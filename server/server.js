@@ -5,6 +5,7 @@ const express = require("express");
 const app = express();
 const port = 5000;
 const nodeId = process.env.NODE_ID || "NODE-A";
+const relayTarget = process.env.RELAY_TARGET;
 const requiredSosFields = [
     "messageId",
     "sourceNode",
@@ -93,22 +94,43 @@ app.post("/receive-sos", (req, res) => {
 
     const sos = req.body;
 
-    console.log("================================");
-    console.log("SOS RECEIVED");
-    console.log("================================");
-    console.log(`Message ID: ${sos.messageId}`);
-    console.log(`Source: ${sos.sourceNode}`);
-    console.log(`Type: ${sos.type}`);
-    console.log(`Priority: ${sos.priority}`);
-    console.log(`Message: ${sos.message}`);
-    console.log(`Location: ${sos.location.latitude}, ${sos.location.longitude}`);
-    console.log(`Timestamp: ${sos.timestamp}`);
-    console.log("================================");
+    console.log(`[${nodeId}] SOS received: ${sos.messageId}`);
+    console.log(`[${nodeId}] Source: ${sos.sourceNode}`);
+    console.log(`[${nodeId}] Type: ${sos.type}`);
+    console.log(`[${nodeId}] Priority: ${sos.priority}`);
+    console.log(`[${nodeId}] Message: ${sos.message}`);
+    console.log(`[${nodeId}] Location: ${sos.location.latitude}, ${sos.location.longitude}`);
+    console.log(`[${nodeId}] Timestamp: ${sos.timestamp}`);
+
+    if (relayTarget) {
+        const relayUrl = `${relayTarget.replace(/\/$/, "")}/receive-sos`;
+
+        console.log(`[${nodeId}] Relaying ${sos.messageId} to ${relayUrl}`);
+
+        fetch(relayUrl, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(sos)
+        })
+            .then(async (relayResponse) => {
+                if (!relayResponse.ok) {
+                    throw new Error(`HTTP ${relayResponse.status}`);
+                }
+
+                console.log(`[${nodeId}] Relay successful`);
+            })
+            .catch((error) => {
+                console.error(`[${nodeId}] Relay failed: ${error.message}`);
+            });
+    }
 
     return res.json({
         success: true,
         receivedBy: nodeId,
-        messageId: sos.messageId
+        messageId: sos.messageId,
+        relayed: Boolean(relayTarget)
     });
 });
 
