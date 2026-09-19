@@ -546,3 +546,13 @@ Invoke-RestMethod http://localhost:5000/sos
 ```
 
 Choose an SOS type, enter a message and location note, and select `Send SOS`. The backend calculates priority from the type, and the new incident appears in the responder feed. For example, `TRAPPED` is returned and displayed with priority `100`, while `MEDICAL` is displayed with priority `90`.
+
+## Phase 8: GPS auto-detection and incident map
+
+Phase 8 uses the browser's `navigator.geolocation` API. Opening the dashboard requests location permission normally. The survivor form shows `Detecting location...`, `Location detected`, or `Location unavailable`. The optional location note remains a descriptive label; latitude and longitude are never manually entered.
+
+When location is available, `POST /sos` receives the existing location object with detected `latitude` and `longitude`. When permission is denied or unavailable, the SOS can still be sent with `latitude` and `longitude` set to `null` and a `Location unavailable` label. Such incidents remain visible in the feed but are not plotted until valid coordinates are available.
+
+The responder dashboard includes a Leaflet map. Markers come only from valid coordinates in the existing `GET /sos` incident feed. Selecting a marker shows the SOS type, priority, message, source node, received-by node, timestamp, and coordinates. No marker coordinates are hardcoded.
+
+For local browser testing, `http://localhost:5173` is treated as a secure context by most browsers and can request geolocation. Browsers may block geolocation on a plain HTTP LAN address; use localhost for the test or serve the frontend over HTTPS when testing from another device.

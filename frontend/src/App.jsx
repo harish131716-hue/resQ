@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import IncidentMap from "./IncidentMap";
 import {
   Activity,
   AlertCircle,
@@ -68,12 +69,47 @@ async function fetchJson(path, options) {
 function App() {
   const [selectedType, setSelectedType] = useState("TRAPPED");
   const [message, setMessage] = useState("");
-  const [location, setLocation] = useState("");
+  const [locationNote, setLocationNote] = useState("");
+  const [detectedLocation, setDetectedLocation] = useState(null);
+  const [locationStatus, setLocationStatus] = useState("idle");
   const [incidents, setIncidents] = useState([]);
   const [nodeStatus, setNodeStatus] = useState({ node: "—", online: false, phase: "—" });
   const [isSending, setIsSending] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [notice, setNotice] = useState(null);
+
+  function detectLocation() {
+    if (!navigator.geolocation) {
+      setLocationStatus("unavailable");
+      return Promise.resolve(null);
+    }
+
+    setLocationStatus("detecting");
+
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const location = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude
+          };
+          setDetectedLocation(location);
+          setLocationStatus("detected");
+          resolve(location);
+        },
+        () => {
+          setDetectedLocation(null);
+          setLocationStatus("unavailable");
+          resolve(null);
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 30000,
+          timeout: 10000
+        }
+      );
+    });
+  }
 
   async function loadDashboard(showSpinner = false) {
     if (showSpinner) setIsRefreshing(true);
@@ -93,6 +129,7 @@ function App() {
   }
 
   useEffect(() => {
+    void detectLocation();
     loadDashboard(true);
     const interval = window.setInterval(() => loadDashboard(), 5000);
     return () => window.clearInterval(interval);
@@ -104,6 +141,7 @@ function App() {
     setNotice(null);
 
     try {
+      const currentLocation = detectedLocation || await detectLocation();
       const created = await fetchJson("/sos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -112,14 +150,15 @@ function App() {
           priority: 0,
           message: message.trim() || "Urgent assistance required",
           location: {
-            latitude: 0,
-            longitude: 0,
-            label: location.trim() || "Location to be confirmed"
+            latitude: currentLocation?.latitude ?? null,
+            longitude: currentLocation?.longitude ?? null,
+            label: locationNote.trim() || (currentLocation ? "Browser location" : "Location unavailable")
           }
         })
       });
       setNotice({ kind: "success", text: `SOS ${created.messageId} sent with priority ${created.sos.priority}.` });
       setMessage("");
+      setLocationNote("");
       await loadDashboard();
     } catch (error) {
       setNotice({ kind: "error", text: error.message });
@@ -205,13 +244,20 @@ function App() {
                   placeholder="Describe the situation briefly..."
                   rows="3"
                 />
-                <label className="input-label" htmlFor="location">Location note</label>
+                <div className={`location-status location-${locationStatus}`} role="status">
+                  <MapPin size={15} />
+                  {locationStatus === "detecting" && <span>Detecting location...</span>}
+                  {locationStatus === "detected" && <span>Location detected: {detectedLocation.latitude.toFixed(5)}, {detectedLocation.longitude.toFixed(5)}</span>}
+                  {(locationStatus === "unavailable" || locationStatus === "idle") && <span>Location unavailable</span>}
+                  <button type="button" onClick={() => void detectLocation()}>Detect again</button>
+                </div>
+                <label className="input-label" htmlFor="location">Location note <span className="optional-label">optional</span></label>
                 <div className="input-with-icon">
                   <MapPin size={17} />
                   <input
                     id="location"
-                    value={location}
-                    onChange={(event) => setLocation(event.target.value)}
+                    value={locationNote}
+                    onChange={(event) => setLocationNote(event.target.value)}
                     placeholder="Landmark, street, or area"
                   />
                 </div>
@@ -266,6 +312,9 @@ function App() {
                         <span><strong>ID</strong> <code>{incident.messageId}</code></span>
                         <span><strong>FROM</strong> {incident.sourceNode}</span>
                         <span><strong>RECEIVED BY</strong> {incident.receivedBy || nodeStatus.node}</span>
+                        {Number.isFinite(incident.location?.latitude) && Number.isFinite(incident.location?.longitude) && (
+                          <span><strong>LOC</strong> {incident.location.latitude.toFixed(5)}, {incident.location.longitude.toFixed(5)}</span>
+                        )}
                       </div>
                     </article>
                   );
@@ -273,6 +322,18 @@ function App() {
               </div>
             </section>
           </div>
+
+          <section className="panel map-panel">
+            <div className="panel-heading">
+              <div>
+                <p className="section-kicker">GEOSPATIAL VIEW</p>
+                <h2>Incident map</h2>
+              </div>
+              <div className="map-count"><MapPin size={14} /> {incidents.filter((incident) => Number.isFinite(incident.location?.latitude) && Number.isFinite(incident.location?.longitude)).length} located</div>
+            </div>
+            <p className="panel-intro map-intro">Markers come directly from the local incident feed. Select a marker to inspect the full SOS record.</p>
+            <IncidentMap incidents={incidents} />
+          </section>
 
           <section className="network-strip">
             <div className="network-strip-title"><Activity size={17} /><span>Network status</span></div>
