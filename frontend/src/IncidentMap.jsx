@@ -50,8 +50,14 @@ function IncidentMap({ incidents }) {
       maxZoom: 19
     }).addTo(mapInstance.current);
     markerLayer.current = L.layerGroup().addTo(mapInstance.current);
+    const resizeObserver = new ResizeObserver(() => {
+      mapInstance.current?.invalidateSize();
+    });
+    resizeObserver.observe(mapElement.current);
+    requestAnimationFrame(() => mapInstance.current?.invalidateSize());
 
     return () => {
+      resizeObserver.disconnect();
       mapInstance.current?.remove();
       mapInstance.current = null;
       markerLayer.current = null;
