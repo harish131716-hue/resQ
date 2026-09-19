@@ -8,8 +8,11 @@ const nodeId = process.env.NODE_ID || "NODE-A";
 const relayTarget = process.env.RELAY_TARGET;
 const ttlMs = getPositiveNumber(process.env.SOS_TTL_MS, 300000);
 const clockSkewMs = getPositiveNumber(process.env.SOS_CLOCK_SKEW_MS, 30000);
+const retryIntervalMs = getPositiveNumber(process.env.SOS_RETRY_INTERVAL_MS, 10000);
 const seenMessages = new Set();
 const processedSos = new Map();
+const pendingSos = new Map();
+const retryInProgress = new Set();
 const priorityMapping = Object.freeze({
     TRAPPED: 100,
     MEDICAL: 90,
@@ -83,7 +86,19 @@ function getMessageAge(sos) {
     };
 }
 
-async function sendRelayRequest(sos) {
+function queuePendingSos(sos) {
+    if (!relayTarget || pendingSos.has(sos.messageId)) {
+        return;
+    }
+
+    pendingSos.set(sos.messageId, {
+        ...sos,
+        location: { ...sos.location }
+    });
+    console.log(`[${nodeId}] Queued SOS ${sos.messageId}`);
+}
+
+async function sendRelayRequest(sos, { isRetry = false, queueOnFailure = true } = {}) {
     if (!relayTarget) {
         return {
             relayed: false
@@ -92,7 +107,7 @@ async function sendRelayRequest(sos) {
 
     const relayUrl = `${relayTarget.replace(/\/$/, "")}/receive-sos`;
 
-    console.log(`[${nodeId}] Relaying ${sos.messageId} to ${relayUrl}`);
+    console.log(`[${nodeId}] ${isRetry ? "Retrying" : "Relaying"} ${sos.messageId} to ${relayUrl}`);
 
     try {
         const relayResponse = await fetch(relayUrl, {
@@ -107,18 +122,44 @@ async function sendRelayRequest(sos) {
             throw new Error(`HTTP ${relayResponse.status}`);
         }
 
-        console.log(`[${nodeId}] Relay successful`);
+        pendingSos.delete(sos.messageId);
+        console.log(`[${nodeId}] ${isRetry ? "Retry successful" : "Relay successful"} ${sos.messageId}`);
 
         return {
             relayed: true
         };
     } catch (error) {
         console.error(`[${nodeId}] Relay failed: ${error.message}`);
+        if (queueOnFailure) {
+            queuePendingSos(sos);
+        }
 
         return {
             relayed: false,
             relayError: error.message
         };
+    }
+}
+
+async function retryPendingSos() {
+    for (const [messageId, sos] of pendingSos) {
+        if (retryInProgress.has(messageId)) {
+            continue;
+        }
+
+        const messageAge = getMessageAge(sos);
+        if (messageAge.error || messageAge.ageMs > ttlMs) {
+            pendingSos.delete(messageId);
+            console.log(`[${nodeId}] Dropped stale queued SOS ${messageId}`);
+            continue;
+        }
+
+        retryInProgress.add(messageId);
+        try {
+            await sendRelayRequest(sos, { isRetry: true, queueOnFailure: false });
+        } finally {
+            retryInProgress.delete(messageId);
+        }
     }
 }
 
@@ -269,6 +310,15 @@ app.get("/sos", (req, res) => {
     });
 });
 
+app.get("/pending-sos", (req, res) => {
+    return res.json({
+        success: true,
+        node: nodeId,
+        count: pendingSos.size,
+        pending: Array.from(pendingSos.values())
+    });
+});
+
 app.post("/receive-sos", (req, res) => {
     const validationError = validateSosMessage(req.body);
 
@@ -285,6 +335,10 @@ app.post("/receive-sos", (req, res) => {
 
     return res.status(result.status).json(response);
 });
+
+setInterval(() => {
+    void retryPendingSos();
+}, retryIntervalMs);
 
 app.listen(port, "0.0.0.0", () => {
     console.log(`${nodeId} server running on http://0.0.0.0:${port}`);
