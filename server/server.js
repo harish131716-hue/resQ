@@ -163,17 +163,7 @@ async function retryPendingSos() {
     }
 }
 
-function relaySos(sos) {
-    if (!relayTarget) {
-        return false;
-    }
-
-    void sendRelayRequest(sos);
-
-    return true;
-}
-
-function processSos(sos, { relay = true } = {}) {
+async function processSos(sos, { relay = true } = {}) {
     const messageAge = getMessageAge(sos);
 
     if (messageAge.error) {
@@ -236,6 +226,10 @@ function processSos(sos, { relay = true } = {}) {
     console.log(`[${nodeId}] Location: ${sos.location.latitude}, ${sos.location.longitude}`);
     console.log(`[${nodeId}] Timestamp: ${sos.timestamp}`);
 
+    const relayResult = relay
+        ? await sendRelayRequest(sos)
+        : { relayed: false };
+
     return {
         status: 200,
         success: true,
@@ -244,7 +238,8 @@ function processSos(sos, { relay = true } = {}) {
         receivedBy: nodeId,
         messageId: sos.messageId,
         priority: sos.priority,
-        relayed: relay ? relaySos(sos) : false
+        relayed: relayResult.relayed,
+        ...(relayResult.relayError ? { relayError: relayResult.relayError } : {})
     };
 }
 
@@ -286,7 +281,7 @@ app.post("/sos", async (req, res) => {
         });
     }
 
-    const result = processSos(sos, { relay: false });
+    const result = await processSos(sos, { relay: false });
     const relayResult = await sendRelayRequest(sos);
 
     return res.status(201).json({
@@ -319,7 +314,7 @@ app.get("/pending-sos", (req, res) => {
     });
 });
 
-app.post("/receive-sos", (req, res) => {
+app.post("/receive-sos", async (req, res) => {
     const validationError = validateSosMessage(req.body);
 
     if (validationError) {
@@ -329,7 +324,7 @@ app.post("/receive-sos", (req, res) => {
         });
     }
 
-    const result = processSos(req.body);
+    const result = await processSos(req.body);
     const response = { ...result };
     delete response.status;
 

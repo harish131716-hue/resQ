@@ -40,6 +40,24 @@ npm run dev
 ```
 
 The existing SOS map, clustering, GPS, relay, TTL, deduplication, and priority behavior are unchanged.
+
+## Phase 11: Store-and-forward
+
+Failed relay attempts are now retained in a local in-memory pending queue. Set `SOS_RETRY_INTERVAL_MS` to configure retry timing; the default is `10000` milliseconds:
+
+```powershell
+$env:SOS_RETRY_INTERVAL_MS = "10000"
+```
+
+When a relay target is unavailable, the complete SOS remains queued with the same `messageId`, source, type, priority, message, location, and timestamp. The server retries periodically. A successful retry removes the SOS from the queue; failed retries remain queued. Before every retry, the existing TTL check runs, and stale queued messages are dropped without forwarding.
+
+Inspect the local queue with:
+
+```powershell
+Invoke-RestMethod http://localhost:5000/pending-sos
+```
+
+Useful server logs include `Queued SOS`, `Retrying SOS`, `Retry successful`, and `Dropped stale queued SOS`. The queue is memory-only and resets when that node restarts. No database, store synchronization, gateway synchronization, or new message protocol is introduced.
 ## Install and start
 
 Open a terminal in the `server` directory:
