@@ -9,6 +9,15 @@ const relayTarget = process.env.RELAY_TARGET;
 const ttlMs = getPositiveNumber(process.env.SOS_TTL_MS, 300000);
 const clockSkewMs = getPositiveNumber(process.env.SOS_CLOCK_SKEW_MS, 30000);
 const seenMessages = new Set();
+const priorityMapping = Object.freeze({
+    TRAPPED: 100,
+    MEDICAL: 90,
+    FIRE: 85,
+    MISSING: 80,
+    WATER: 60,
+    FOOD: 50
+});
+const defaultPriority = 40;
 const requiredSosFields = [
     "messageId",
     "sourceNode",
@@ -23,6 +32,12 @@ function getPositiveNumber(value, fallback) {
     const number = Number(value);
 
     return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function calculatePriority(type) {
+    const normalizedType = typeof type === "string" ? type.trim().toUpperCase() : "";
+
+    return priorityMapping[normalizedType] ?? defaultPriority;
 }
 
 function validateSosMessage(sos) {
@@ -105,6 +120,8 @@ app.post("/sos", (req, res) => {
         });
     }
 
+    sos.priority = calculatePriority(sos.type);
+
     return res.status(201).json({
         success: true,
         messageId: sos.messageId,
@@ -167,13 +184,14 @@ app.post("/receive-sos", (req, res) => {
     }
 
     seenMessages.add(sos.messageId);
+    sos.priority = calculatePriority(sos.type);
     console.log(`[${nodeId}] Processing ${sos.messageId}`);
     console.log(`[${nodeId}] New SOS received: ${sos.messageId}`);
     console.log(`[${nodeId}] Added ${sos.messageId} to seen messages`);
 
     console.log(`[${nodeId}] Source: ${sos.sourceNode}`);
     console.log(`[${nodeId}] Type: ${sos.type}`);
-    console.log(`[${nodeId}] Priority: ${sos.priority}`);
+    console.log(`[${nodeId}] Calculated priority: ${sos.priority}`);
     console.log(`[${nodeId}] Message: ${sos.message}`);
     console.log(`[${nodeId}] Location: ${sos.location.latitude}, ${sos.location.longitude}`);
     console.log(`[${nodeId}] Timestamp: ${sos.timestamp}`);
@@ -208,6 +226,7 @@ app.post("/receive-sos", (req, res) => {
         stale: false,
         receivedBy: nodeId,
         messageId: sos.messageId,
+        priority: sos.priority,
         relayed: Boolean(relayTarget)
     });
 });
