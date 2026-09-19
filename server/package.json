@@ -1,0 +1,20 @@
+{
+  "name": "resqmesh-server",
+  "version": "1.0.0",
+  "description": "ResQMesh Phase 2 local Wi-Fi SOS communication server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "send-sos": "node test-send-sos.js"
+  },
+  "keywords": [
+    "resqmesh",
+    "disaster-communication",
+    "local-network"
+  ],
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.2.1"
+  }
+}
