@@ -6,6 +6,7 @@ const app = express();
 const port = 5000;
 const nodeId = process.env.NODE_ID || "NODE-A";
 const relayTarget = process.env.RELAY_TARGET;
+const seenMessages = new Set();
 const requiredSosFields = [
     "messageId",
     "sourceNode",
@@ -94,7 +95,22 @@ app.post("/receive-sos", (req, res) => {
 
     const sos = req.body;
 
-    console.log(`[${nodeId}] SOS received: ${sos.messageId}`);
+    if (seenMessages.has(sos.messageId)) {
+        console.log(`[${nodeId}] Duplicate SOS ignored: ${sos.messageId}`);
+
+        return res.json({
+            success: true,
+            duplicate: true,
+            receivedBy: nodeId,
+            messageId: sos.messageId,
+            relayed: false
+        });
+    }
+
+    seenMessages.add(sos.messageId);
+    console.log(`[${nodeId}] New SOS received: ${sos.messageId}`);
+    console.log(`[${nodeId}] Added ${sos.messageId} to seen messages`);
+
     console.log(`[${nodeId}] Source: ${sos.sourceNode}`);
     console.log(`[${nodeId}] Type: ${sos.type}`);
     console.log(`[${nodeId}] Priority: ${sos.priority}`);
@@ -128,6 +144,7 @@ app.post("/receive-sos", (req, res) => {
 
     return res.json({
         success: true,
+        duplicate: false,
         receivedBy: nodeId,
         messageId: sos.messageId,
         relayed: Boolean(relayTarget)
