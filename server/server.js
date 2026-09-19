@@ -83,37 +83,56 @@ function getMessageAge(sos) {
     };
 }
 
-function relaySos(sos) {
+async function sendRelayRequest(sos) {
     if (!relayTarget) {
-        return false;
+        return {
+            relayed: false
+        };
     }
 
     const relayUrl = `${relayTarget.replace(/\/$/, "")}/receive-sos`;
 
     console.log(`[${nodeId}] Relaying ${sos.messageId} to ${relayUrl}`);
 
-    fetch(relayUrl, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify(sos)
-    })
-        .then(async (relayResponse) => {
-            if (!relayResponse.ok) {
-                throw new Error(`HTTP ${relayResponse.status}`);
-            }
-
-            console.log(`[${nodeId}] Relay successful`);
-        })
-        .catch((error) => {
-            console.error(`[${nodeId}] Relay failed: ${error.message}`);
+    try {
+        const relayResponse = await fetch(relayUrl, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(sos)
         });
+
+        if (!relayResponse.ok) {
+            throw new Error(`HTTP ${relayResponse.status}`);
+        }
+
+        console.log(`[${nodeId}] Relay successful`);
+
+        return {
+            relayed: true
+        };
+    } catch (error) {
+        console.error(`[${nodeId}] Relay failed: ${error.message}`);
+
+        return {
+            relayed: false,
+            relayError: error.message
+        };
+    }
+}
+
+function relaySos(sos) {
+    if (!relayTarget) {
+        return false;
+    }
+
+    void sendRelayRequest(sos);
 
     return true;
 }
 
-function processSos(sos) {
+function processSos(sos, { relay = true } = {}) {
     const messageAge = getMessageAge(sos);
 
     if (messageAge.error) {
@@ -184,7 +203,7 @@ function processSos(sos) {
         receivedBy: nodeId,
         messageId: sos.messageId,
         priority: sos.priority,
-        relayed: relaySos(sos)
+        relayed: relay ? relaySos(sos) : false
     };
 }
 
@@ -207,7 +226,7 @@ app.get("/test", (req, res) => {
     });
 });
 
-app.post("/sos", (req, res) => {
+app.post("/sos", async (req, res) => {
     const sos = {
         messageId: `SOS-${randomUUID()}`,
         sourceNode: nodeId,
@@ -226,7 +245,8 @@ app.post("/sos", (req, res) => {
         });
     }
 
-    const result = processSos(sos);
+    const result = processSos(sos, { relay: false });
+    const relayResult = await sendRelayRequest(sos);
 
     return res.status(201).json({
         success: result.success,
@@ -235,7 +255,8 @@ app.post("/sos", (req, res) => {
         duplicate: result.duplicate,
         stale: result.stale,
         priority: sos.priority,
-        relayed: result.relayed,
+        relayed: relayResult.relayed,
+        ...(relayResult.relayError ? { relayError: relayResult.relayError } : {}),
         sos
     });
 });
