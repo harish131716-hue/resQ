@@ -6,6 +6,8 @@ const app = express();
 const port = 5000;
 const nodeId = process.env.NODE_ID || "NODE-A";
 const relayTarget = process.env.RELAY_TARGET;
+const ttlMs = getPositiveNumber(process.env.SOS_TTL_MS, 300000);
+const clockSkewMs = getPositiveNumber(process.env.SOS_CLOCK_SKEW_MS, 30000);
 const seenMessages = new Set();
 const requiredSosFields = [
     "messageId",
@@ -16,6 +18,12 @@ const requiredSosFields = [
     "location",
     "timestamp"
 ];
+
+function getPositiveNumber(value, fallback) {
+    const number = Number(value);
+
+    return Number.isFinite(number) && number > 0 ? number : fallback;
+}
 
 function validateSosMessage(sos) {
     if (!sos || typeof sos !== "object" || Array.isArray(sos)) {
@@ -35,6 +43,28 @@ function validateSosMessage(sos) {
     }
 
     return null;
+}
+
+function getMessageAge(sos) {
+    const timestampMs = Date.parse(sos.timestamp);
+
+    if (!Number.isFinite(timestampMs)) {
+        return {
+            error: "timestamp must be a valid ISO 8601 timestamp"
+        };
+    }
+
+    const rawAgeMs = Date.now() - timestampMs;
+
+    if (rawAgeMs < -clockSkewMs) {
+        return {
+            error: `timestamp is too far in the future; clock skew allowance is ${clockSkewMs}ms`
+        };
+    }
+
+    return {
+        ageMs: Math.max(0, rawAgeMs)
+    };
 }
 
 app.use(cors());
@@ -94,6 +124,34 @@ app.post("/receive-sos", (req, res) => {
     }
 
     const sos = req.body;
+    const messageAge = getMessageAge(sos);
+
+    if (messageAge.error) {
+        return res.status(400).json({
+            success: false,
+            error: messageAge.error,
+            receivedBy: nodeId,
+            messageId: sos.messageId,
+            relayed: false
+        });
+    }
+
+    if (messageAge.ageMs > ttlMs) {
+        console.log(`[${nodeId}] Stale SOS rejected: ${sos.messageId}`);
+        console.log(`[${nodeId}] Message age: ${messageAge.ageMs}ms`);
+        console.log(`[${nodeId}] TTL: ${ttlMs}ms`);
+
+        return res.status(410).json({
+            success: false,
+            stale: true,
+            receivedBy: nodeId,
+            messageId: sos.messageId,
+            relayed: false
+        });
+    }
+
+    console.log(`[${nodeId}] SOS is fresh: ${sos.messageId}`);
+    console.log(`[${nodeId}] Message age: ${messageAge.ageMs}ms`);
 
     if (seenMessages.has(sos.messageId)) {
         console.log(`[${nodeId}] Duplicate SOS ignored: ${sos.messageId}`);
@@ -101,6 +159,7 @@ app.post("/receive-sos", (req, res) => {
         return res.json({
             success: true,
             duplicate: true,
+            stale: false,
             receivedBy: nodeId,
             messageId: sos.messageId,
             relayed: false
@@ -108,6 +167,7 @@ app.post("/receive-sos", (req, res) => {
     }
 
     seenMessages.add(sos.messageId);
+    console.log(`[${nodeId}] Processing ${sos.messageId}`);
     console.log(`[${nodeId}] New SOS received: ${sos.messageId}`);
     console.log(`[${nodeId}] Added ${sos.messageId} to seen messages`);
 
@@ -145,6 +205,7 @@ app.post("/receive-sos", (req, res) => {
     return res.json({
         success: true,
         duplicate: false,
+        stale: false,
         receivedBy: nodeId,
         messageId: sos.messageId,
         relayed: Boolean(relayTarget)
