@@ -17,6 +17,29 @@ ResQMesh/
 
 The server listens on port `5000` and binds to `0.0.0.0`, so it can receive requests through the host computer's LAN IPv4 address.
 
+
+## Phase 10: Mesh network visualization
+
+The dashboard includes a frontend-only mesh topology section. It polls each configured node's existing `GET /` and `GET /sos` endpoints, showing node ID, online/offline status, and received SOS count. Directed links represent the configured MVP path `NODE-A -> NODE-B -> NODE-C`. A link becomes active when matching `messageId` values appear in the downstream node feed, indicating that the SOS propagated successfully.
+
+The default local node URLs are:
+
+```text
+NODE-A: http://localhost:5000
+NODE-B: http://localhost:5001
+NODE-C: http://localhost:5002
+```
+
+For a multi-laptop setup, configure the frontend before starting Vite:
+
+```powershell
+$env:VITE_NODE_A_URL = "http://NODE-A-IP:5000"
+$env:VITE_NODE_B_URL = "http://NODE-B-IP:5000"
+$env:VITE_NODE_C_URL = "http://NODE-C-IP:5000"
+npm run dev
+```
+
+The existing SOS map, clustering, GPS, relay, TTL, deduplication, and priority behavior are unchanged.
 ## Install and start
 
 Open a terminal in the `server` directory:
@@ -556,3 +579,7 @@ When location is available, `POST /sos` receives the existing location object wi
 The responder dashboard includes a Leaflet map. Markers come only from valid coordinates in the existing `GET /sos` incident feed. Selecting a marker shows the SOS type, priority, message, source node, received-by node, timestamp, and coordinates. No marker coordinates are hardcoded.
 
 For local browser testing, `http://localhost:5173` is treated as a secure context by most browsers and can request geolocation. Browsers may block geolocation on a plain HTTP LAN address; use localhost for the test or serve the frontend over HTTPS when testing from another device.
+
+## Phase 9: SOS geographic clustering
+
+The responder map groups nearby incident coordinates in the frontend using a 500-meter default radius. Set `VITE_CLUSTER_RADIUS_METERS` before starting Vite to change it. Cluster markers show the number of SOS incidents and the highest priority in the group. Selecting a cluster lists its incidents; selecting an individual marker shows the existing incident details. The grouping radius contracts as the map zoom increases, so distinct nearby incidents separate when zoomed in. Exact-overlap coordinates remain one cluster because they have no geographic distance between them.

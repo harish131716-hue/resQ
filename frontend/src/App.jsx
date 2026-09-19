@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import IncidentMap from "./IncidentMap";
+import MeshNetwork from "./MeshNetwork";
 import {
-  Activity,
   AlertCircle,
   ArrowUpRight,
   BellRing,
@@ -335,16 +335,9 @@ function App() {
             <IncidentMap incidents={incidents} />
           </section>
 
-          <section className="network-strip">
-            <div className="network-strip-title"><Activity size={17} /><span>Network status</span></div>
-            <div className="network-node"><span className="node-avatar">A</span><div><strong>NODE-A</strong><small>Origin node</small></div><span className="status-dot status-live" /></div>
-            <div className="route-line"><span /><span /><span /></div>
-            <div className="network-node"><span className="node-avatar node-active">B</span><div><strong>{nodeStatus.node}</strong><small>Current node · Phase {nodeStatus.phase}</small></div><span className={`status-dot ${nodeStatus.online ? "status-live" : "status-offline"}`} /></div>
-            <div className="route-line route-muted"><span /><span /><span /></div>
-            <div className="network-node"><span className="node-avatar">C</span><div><strong>NODE-C</strong><small>Relay endpoint</small></div><span className="status-dot status-live" /></div>
-          </section>
+          <MeshNetwork />
         </main>
-        <footer><span>RESQMESH / PHASE 7</span><span>LOCAL-FIRST · NO CLOUD DEPENDENCY</span></footer>
+        <footer><span>RESQMESH / PHASE 10</span><span>LOCAL-FIRST · NO CLOUD DEPENDENCY</span></footer>
       </div>
     </div>
   );
