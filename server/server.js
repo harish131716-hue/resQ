@@ -9,6 +9,7 @@ const relayTarget = process.env.RELAY_TARGET;
 const ttlMs = getPositiveNumber(process.env.SOS_TTL_MS, 300000);
 const clockSkewMs = getPositiveNumber(process.env.SOS_CLOCK_SKEW_MS, 30000);
 const seenMessages = new Set();
+const processedSos = new Map();
 const priorityMapping = Object.freeze({
     TRAPPED: 100,
     MEDICAL: 90,
@@ -121,12 +122,24 @@ app.post("/sos", (req, res) => {
     }
 
     sos.priority = calculatePriority(sos.type);
+    processedSos.set(sos.messageId, {
+        ...sos,
+        receivedBy: nodeId
+    });
 
     return res.status(201).json({
         success: true,
         messageId: sos.messageId,
         createdBy: nodeId,
         sos
+    });
+});
+
+app.get("/sos", (req, res) => {
+    return res.json({
+        success: true,
+        node: nodeId,
+        incidents: Array.from(processedSos.values()).reverse()
     });
 });
 
@@ -185,6 +198,10 @@ app.post("/receive-sos", (req, res) => {
 
     seenMessages.add(sos.messageId);
     sos.priority = calculatePriority(sos.type);
+    processedSos.set(sos.messageId, {
+        ...sos,
+        receivedBy: nodeId
+    });
     console.log(`[${nodeId}] Processing ${sos.messageId}`);
     console.log(`[${nodeId}] New SOS received: ${sos.messageId}`);
     console.log(`[${nodeId}] Added ${sos.messageId} to seen messages`);
