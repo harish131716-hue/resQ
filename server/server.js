@@ -3,7 +3,7 @@ const cors = require("cors");
 const express = require("express");
 
 const app = express();
-const port = 5000;
+const port = getPositiveNumber(process.env.PORT, 5000);
 const nodeId = process.env.NODE_ID || "NODE-A";
 const relayTarget = process.env.RELAY_TARGET;
 const ttlMs = getPositiveNumber(process.env.SOS_TTL_MS, 300000);
@@ -83,6 +83,111 @@ function getMessageAge(sos) {
     };
 }
 
+function relaySos(sos) {
+    if (!relayTarget) {
+        return false;
+    }
+
+    const relayUrl = `${relayTarget.replace(/\/$/, "")}/receive-sos`;
+
+    console.log(`[${nodeId}] Relaying ${sos.messageId} to ${relayUrl}`);
+
+    fetch(relayUrl, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify(sos)
+    })
+        .then(async (relayResponse) => {
+            if (!relayResponse.ok) {
+                throw new Error(`HTTP ${relayResponse.status}`);
+            }
+
+            console.log(`[${nodeId}] Relay successful`);
+        })
+        .catch((error) => {
+            console.error(`[${nodeId}] Relay failed: ${error.message}`);
+        });
+
+    return true;
+}
+
+function processSos(sos) {
+    const messageAge = getMessageAge(sos);
+
+    if (messageAge.error) {
+        return {
+            status: 400,
+            success: false,
+            error: messageAge.error,
+            receivedBy: nodeId,
+            messageId: sos.messageId,
+            relayed: false
+        };
+    }
+
+    if (messageAge.ageMs > ttlMs) {
+        console.log(`[${nodeId}] Stale SOS rejected: ${sos.messageId}`);
+        console.log(`[${nodeId}] Message age: ${messageAge.ageMs}ms`);
+        console.log(`[${nodeId}] TTL: ${ttlMs}ms`);
+
+        return {
+            status: 410,
+            success: false,
+            stale: true,
+            receivedBy: nodeId,
+            messageId: sos.messageId,
+            relayed: false
+        };
+    }
+
+    console.log(`[${nodeId}] SOS is fresh: ${sos.messageId}`);
+    console.log(`[${nodeId}] Message age: ${messageAge.ageMs}ms`);
+
+    if (seenMessages.has(sos.messageId)) {
+        console.log(`[${nodeId}] Duplicate SOS ignored: ${sos.messageId}`);
+
+        return {
+            status: 200,
+            success: true,
+            duplicate: true,
+            stale: false,
+            receivedBy: nodeId,
+            messageId: sos.messageId,
+            relayed: false
+        };
+    }
+
+    seenMessages.add(sos.messageId);
+    sos.priority = calculatePriority(sos.type);
+    processedSos.set(sos.messageId, {
+        ...sos,
+        receivedBy: nodeId
+    });
+
+    console.log(`[${nodeId}] Processing ${sos.messageId}`);
+    console.log(`[${nodeId}] New SOS received: ${sos.messageId}`);
+    console.log(`[${nodeId}] Added ${sos.messageId} to seen messages`);
+    console.log(`[${nodeId}] Source: ${sos.sourceNode}`);
+    console.log(`[${nodeId}] Type: ${sos.type}`);
+    console.log(`[${nodeId}] Calculated priority: ${sos.priority}`);
+    console.log(`[${nodeId}] Message: ${sos.message}`);
+    console.log(`[${nodeId}] Location: ${sos.location.latitude}, ${sos.location.longitude}`);
+    console.log(`[${nodeId}] Timestamp: ${sos.timestamp}`);
+
+    return {
+        status: 200,
+        success: true,
+        duplicate: false,
+        stale: false,
+        receivedBy: nodeId,
+        messageId: sos.messageId,
+        priority: sos.priority,
+        relayed: relaySos(sos)
+    };
+}
+
 app.use(cors());
 app.use(express.json());
 
@@ -121,16 +226,16 @@ app.post("/sos", (req, res) => {
         });
     }
 
-    sos.priority = calculatePriority(sos.type);
-    processedSos.set(sos.messageId, {
-        ...sos,
-        receivedBy: nodeId
-    });
+    const result = processSos(sos);
 
     return res.status(201).json({
-        success: true,
+        success: result.success,
         messageId: sos.messageId,
         createdBy: nodeId,
+        duplicate: result.duplicate,
+        stale: result.stale,
+        priority: sos.priority,
+        relayed: result.relayed,
         sos
     });
 });
@@ -153,99 +258,11 @@ app.post("/receive-sos", (req, res) => {
         });
     }
 
-    const sos = req.body;
-    const messageAge = getMessageAge(sos);
+    const result = processSos(req.body);
+    const response = { ...result };
+    delete response.status;
 
-    if (messageAge.error) {
-        return res.status(400).json({
-            success: false,
-            error: messageAge.error,
-            receivedBy: nodeId,
-            messageId: sos.messageId,
-            relayed: false
-        });
-    }
-
-    if (messageAge.ageMs > ttlMs) {
-        console.log(`[${nodeId}] Stale SOS rejected: ${sos.messageId}`);
-        console.log(`[${nodeId}] Message age: ${messageAge.ageMs}ms`);
-        console.log(`[${nodeId}] TTL: ${ttlMs}ms`);
-
-        return res.status(410).json({
-            success: false,
-            stale: true,
-            receivedBy: nodeId,
-            messageId: sos.messageId,
-            relayed: false
-        });
-    }
-
-    console.log(`[${nodeId}] SOS is fresh: ${sos.messageId}`);
-    console.log(`[${nodeId}] Message age: ${messageAge.ageMs}ms`);
-
-    if (seenMessages.has(sos.messageId)) {
-        console.log(`[${nodeId}] Duplicate SOS ignored: ${sos.messageId}`);
-
-        return res.json({
-            success: true,
-            duplicate: true,
-            stale: false,
-            receivedBy: nodeId,
-            messageId: sos.messageId,
-            relayed: false
-        });
-    }
-
-    seenMessages.add(sos.messageId);
-    sos.priority = calculatePriority(sos.type);
-    processedSos.set(sos.messageId, {
-        ...sos,
-        receivedBy: nodeId
-    });
-    console.log(`[${nodeId}] Processing ${sos.messageId}`);
-    console.log(`[${nodeId}] New SOS received: ${sos.messageId}`);
-    console.log(`[${nodeId}] Added ${sos.messageId} to seen messages`);
-
-    console.log(`[${nodeId}] Source: ${sos.sourceNode}`);
-    console.log(`[${nodeId}] Type: ${sos.type}`);
-    console.log(`[${nodeId}] Calculated priority: ${sos.priority}`);
-    console.log(`[${nodeId}] Message: ${sos.message}`);
-    console.log(`[${nodeId}] Location: ${sos.location.latitude}, ${sos.location.longitude}`);
-    console.log(`[${nodeId}] Timestamp: ${sos.timestamp}`);
-
-    if (relayTarget) {
-        const relayUrl = `${relayTarget.replace(/\/$/, "")}/receive-sos`;
-
-        console.log(`[${nodeId}] Relaying ${sos.messageId} to ${relayUrl}`);
-
-        fetch(relayUrl, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify(sos)
-        })
-            .then(async (relayResponse) => {
-                if (!relayResponse.ok) {
-                    throw new Error(`HTTP ${relayResponse.status}`);
-                }
-
-                console.log(`[${nodeId}] Relay successful`);
-            })
-            .catch((error) => {
-                console.error(`[${nodeId}] Relay failed: ${error.message}`);
-            });
-    }
-
-    return res.json({
-        success: true,
-        duplicate: false,
-        stale: false,
-        receivedBy: nodeId,
-        messageId: sos.messageId,
-        priority: sos.priority,
-        relayed: Boolean(relayTarget)
-    });
+    return res.status(result.status).json(response);
 });
 
 app.listen(port, "0.0.0.0", () => {
