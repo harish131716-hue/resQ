@@ -519,7 +519,7 @@ The frontend provides:
 - Priority badges using the Phase 6 calculated priority.
 - Polling every five seconds for node health and incidents.
 
-The backend keeps the incident feed in memory for this phase. Existing Phase 1-6 routes and processing remain unchanged. No database, authentication, maps, WebSockets, clustering, or advanced analytics are included.
+When `POST /sos` creates a frontend SOS, it now enters the same processing pipeline as `POST /receive-sos`: validation, freshness, deduplication, priority calculation, in-memory storage, and automatic relay to `RELAY_TARGET/receive-sos`. The generated `messageId`, `sourceNode`, calculated priority, timestamp, and location are preserved across relay hops. The backend keeps the incident feed in memory for this phase. Existing Phase 1-6 routes and processing remain unchanged. No database, authentication, maps, WebSockets, clustering, or advanced analytics are included.
 
 ### Run Phase 7 locally
 
